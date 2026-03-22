@@ -1,5 +1,4 @@
 // src/services/notification.service.js
-const { Op } = require('sequelize');
 const Notification = require('../models/notification.model');
 const emailService = require('./email.service');
 const logger = require('../utils/logger');

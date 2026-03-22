@@ -1,6 +1,5 @@
 // src/controllers/notification.controller.js
 const notificationService = require('../services/notification.service');
-const logger = require('../utils/logger');
 
 class NotificationController {
   /**
