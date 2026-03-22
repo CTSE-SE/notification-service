@@ -1,0 +1,88 @@
+version: '3.9'
+
+services:
+
+  # ─── Notification Service ──────────────────────────────────────────────────
+  notification-service:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: runtime
+    container_name: notification-service
+    ports:
+      - "3001:3001"
+    environment:
+      NODE_ENV: development
+      PORT: 3001
+      # Database
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: notification_db
+      DB_USER: postgres
+      DB_PASSWORD: postgres
+      # AWS – for local dev, use LocalStack or real AWS credentials
+      AWS_REGION: ap-southeast-1
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-test}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-test}
+      # SQS
+      SQS_QUEUE_URL: ${SQS_QUEUE_URL:-http://localstack:4566/000000000000/order-events-queue}
+      # SES
+      SES_FROM_EMAIL: ${SES_FROM_EMAIL:-noreply@yourdomain.com}
+      SES_FROM_NAME: ShopApp Notifications
+      # Auth
+      JWT_SECRET: ${JWT_SECRET:-dev_jwt_secret_change_in_prod}
+      INTERNAL_API_KEY: ${INTERNAL_API_KEY:-dev_internal_key}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - shopapp-network
+    restart: unless-stopped
+    volumes:
+      - ./src:/app/src   # Hot reload in development
+    command: npx nodemon src/index.js
+
+  # ─── PostgreSQL ────────────────────────────────────────────────────────────
+  postgres:
+    image: postgres:15-alpine
+    container_name: notification-postgres
+    environment:
+      POSTGRES_DB: notification_db
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5433:5432"   # Map to 5433 to avoid conflict with other services
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    networks:
+      - shopapp-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ─── LocalStack (emulates AWS SQS + SES locally) ──────────────────────────
+  localstack:
+    image: localstack/localstack:latest
+    container_name: notification-localstack
+    ports:
+      - "4566:4566"
+    environment:
+      SERVICES: sqs,ses
+      DEFAULT_REGION: ap-southeast-1
+      AWS_DEFAULT_REGION: ap-southeast-1
+    volumes:
+      - ./scripts/localstack-init.sh:/etc/localstack/init/ready.d/init.sh
+    networks:
+      - shopapp-network
+
+volumes:
+  postgres-data:
+
+networks:
+  shopapp-network:
+    driver: bridge
+    # Use external network if other services are running in the same compose stack
+    # external: true
+    # name: shopapp-network

@@ -1,0 +1,264 @@
+openapi: 3.0.3
+info:
+  title: Notification Service API
+  description: |
+    Microservice responsible for managing and delivering notifications
+    to users of the ShopApp e-commerce platform.
+
+    **Authentication:** All endpoints (except /health) require a valid JWT Bearer token
+    issued by the User Service.
+
+    **Inter-service:** The SQS consumer automatically processes order events published
+    by the Order Service — no direct API call is needed for that flow.
+  version: 1.0.0
+  contact:
+    name: SE4010 Group – Member 4
+  license:
+    name: MIT
+
+servers:
+  - url: https://{alb_dns}/api/notifications
+    description: Production (AWS ECS via ALB)
+    variables:
+      alb_dns:
+        default: your-alb-dns.ap-southeast-1.elb.amazonaws.com
+  - url: http://localhost:3001/api/notifications
+    description: Local development
+
+tags:
+  - name: Notifications
+    description: User notification management endpoints
+  - name: Health
+    description: Service health check
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  schemas:
+    Notification:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          example: "3f7e1234-ab56-7890-cd12-ef3456789012"
+        userId:
+          type: string
+          example: "usr-12345"
+        userEmail:
+          type: string
+          format: email
+          example: "customer@example.com"
+        type:
+          type: string
+          enum: [order.placed, order.shipped, order.delivered, order.cancelled]
+          example: "order.placed"
+        title:
+          type: string
+          example: "Order Confirmed"
+        message:
+          type: string
+          example: "Your order #ORD-20260315-001 has been confirmed."
+        isRead:
+          type: boolean
+          example: false
+        orderId:
+          type: string
+          example: "ORD-20260315-001"
+        emailSent:
+          type: boolean
+          example: true
+        emailSentAt:
+          type: string
+          format: date-time
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    PaginatedNotifications:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: true
+        notifications:
+          type: array
+          items:
+            $ref: '#/components/schemas/Notification'
+        total:
+          type: integer
+          example: 42
+        page:
+          type: integer
+          example: 1
+        totalPages:
+          type: integer
+          example: 3
+
+    ErrorResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: false
+        message:
+          type: string
+          example: "Notification not found."
+
+    SuccessResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: true
+        message:
+          type: string
+
+paths:
+  /health:
+    get:
+      tags: [Health]
+      summary: Health check
+      description: Returns service health status. Used by ECS for container health checks.
+      security: []
+      responses:
+        '200':
+          description: Service is healthy
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean, example: true }
+                  service: { type: string, example: "notification-service" }
+                  status: { type: string, example: "healthy" }
+                  timestamp: { type: string, format: date-time }
+
+  /unread-count:
+    get:
+      tags: [Notifications]
+      summary: Get unread notification count
+      description: Returns the total number of unread notifications for the authenticated user.
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Unread count
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean, example: true }
+                  data:
+                    type: object
+                    properties:
+                      unreadCount: { type: integer, example: 3 }
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+
+  /:
+    get:
+      tags: [Notifications]
+      summary: Get all notifications (paginated)
+      description: Returns a paginated list of notifications for the authenticated user, newest first.
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: query
+          name: page
+          schema: { type: integer, default: 1, minimum: 1 }
+          description: Page number
+        - in: query
+          name: limit
+          schema: { type: integer, default: 20, minimum: 1, maximum: 100 }
+          description: Items per page
+      responses:
+        '200':
+          description: Paginated notifications
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PaginatedNotifications' }
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+
+  /{id}:
+    get:
+      tags: [Notifications]
+      summary: Get a single notification
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Notification found
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean }
+                  data: { $ref: '#/components/schemas/Notification' }
+        '404':
+          description: Not found
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+
+  /read-all:
+    put:
+      tags: [Notifications]
+      summary: Mark all notifications as read
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: All notifications marked as read
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SuccessResponse' }
+
+  /{id}/read:
+    put:
+      tags: [Notifications]
+      summary: Mark a notification as read
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Notification marked as read
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean }
+                  data: { $ref: '#/components/schemas/Notification' }
+        '404':
+          description: Not found
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
