@@ -1,0 +1,221 @@
+name: CI/CD Pipeline – Notification Service
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+env:
+  AWS_REGION: ap-southeast-1
+  ECR_REPOSITORY: notification-service
+  ECS_CLUSTER: shopapp-cluster
+  ECS_SERVICE: notification-service
+  CONTAINER_NAME: notification-service
+
+jobs:
+  # ─────────────────────────────────────────────────────────────────
+  # JOB 1: Test & Lint
+  # ─────────────────────────────────────────────────────────────────
+  test:
+    name: Run Tests & Lint
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:15-alpine
+        env:
+          POSTGRES_DB: notification_db_test
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run ESLint
+        run: npm run lint
+
+      - name: Run tests with coverage
+        run: npm test
+        env:
+          NODE_ENV: test
+          DB_HOST: localhost
+          DB_PORT: 5432
+          DB_NAME: notification_db_test
+          DB_USER: postgres
+          DB_PASSWORD: postgres
+          JWT_SECRET: test_jwt_secret
+          INTERNAL_API_KEY: test_internal_key
+          AWS_REGION: ap-southeast-1
+          SES_FROM_EMAIL: test@example.com
+          SES_FROM_NAME: Test
+
+      - name: Upload coverage report
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: coverage/
+          retention-days: 7
+
+  # ─────────────────────────────────────────────────────────────────
+  # JOB 2: SonarCloud SAST Scan
+  # ─────────────────────────────────────────────────────────────────
+  sonarcloud:
+    name: SonarCloud SAST Scan
+    runs-on: ubuntu-latest
+    needs: test
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # Full history needed for SonarCloud blame data
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Re-run tests to generate coverage for SonarCloud
+        run: npm test
+        env:
+          NODE_ENV: test
+          JWT_SECRET: test_jwt_secret
+          INTERNAL_API_KEY: test_internal_key
+          AWS_REGION: ap-southeast-1
+          SES_FROM_EMAIL: test@example.com
+          SES_FROM_NAME: Test
+
+      - name: SonarCloud Scan
+        uses: SonarSource/sonarcloud-github-action@master
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+
+  # ─────────────────────────────────────────────────────────────────
+  # JOB 3: Build & Push Docker Image to Amazon ECR
+  # (Only runs on push to main, not on PRs)
+  # ─────────────────────────────────────────────────────────────────
+  build-and-push:
+    name: Build & Push to ECR
+    runs-on: ubuntu-latest
+    needs: [test, sonarcloud]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+
+    outputs:
+      image: ${{ steps.build-image.outputs.image }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build, tag, and push Docker image to ECR
+        id: build-image
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          # Build the Docker image
+          docker build \
+            --tag $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG \
+            --tag $ECR_REGISTRY/$ECR_REPOSITORY:latest \
+            --label "git-commit=$IMAGE_TAG" \
+            --label "build-date=$(date -u +'%Y-%m-%dT%H:%M:%SZ')" \
+            .
+
+          # Push both the commit-SHA tag and latest
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:latest
+
+          echo "image=$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG" >> $GITHUB_OUTPUT
+
+  # ─────────────────────────────────────────────────────────────────
+  # JOB 4: Deploy to Amazon ECS
+  # ─────────────────────────────────────────────────────────────────
+  deploy:
+    name: Deploy to ECS
+    runs-on: ubuntu-latest
+    needs: build-and-push
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Download current ECS task definition
+        run: |
+          aws ecs describe-task-definition \
+            --task-definition ${{ env.ECS_SERVICE }} \
+            --query taskDefinition \
+            > task-definition.json
+
+      - name: Update task definition with new image
+        id: task-def
+        uses: aws-actions/amazon-ecs-render-task-definition@v1
+        with:
+          task-definition: task-definition.json
+          container-name: ${{ env.CONTAINER_NAME }}
+          image: ${{ needs.build-and-push.outputs.image }}
+
+      - name: Deploy updated task definition to ECS
+        uses: aws-actions/amazon-ecs-deploy-task-definition@v1
+        with:
+          task-definition: ${{ steps.task-def.outputs.task-definition }}
+          service: ${{ env.ECS_SERVICE }}
+          cluster: ${{ env.ECS_CLUSTER }}
+          wait-for-service-stability: true   # Waits until deployment is healthy
+
+      - name: Verify deployment health check
+        run: |
+          echo "Waiting 15s for new task to start..."
+          sleep 15
+          ALB_DNS=${{ secrets.ALB_DNS }}
+          RESPONSE=$(curl -s -o /dev/null -w "%{http_code}" \
+            https://${ALB_DNS}/api/notifications/health || \
+            curl -s -o /dev/null -w "%{http_code}" \
+            https://${ALB_DNS}/health)
+          echo "Health check response: $RESPONSE"
+          if [ "$RESPONSE" != "200" ]; then
+            echo "Health check failed with status $RESPONSE"
+            exit 1
+          fi
+          echo "Deployment successful and healthy!"
