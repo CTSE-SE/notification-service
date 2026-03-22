@@ -1,7 +1,7 @@
 // src/services/notification.service.js
-const Notification = require('../models/notification.model');
-const emailService = require('./email.service');
-const logger = require('../utils/logger');
+const Notification = require("../models/notification.model");
+const emailService = require("./email.service");
+const logger = require("../utils/logger");
 
 class NotificationService {
   /**
@@ -27,7 +27,10 @@ class NotificationService {
       metadata: data.metadata || null,
       emailSent: false,
     });
-    logger.info('Notification created in DB.', { id: notification.id, type: data.type });
+    logger.info("Notification created in DB.", {
+      id: notification.id,
+      type: data.type,
+    });
     return notification;
   }
 
@@ -36,14 +39,23 @@ class NotificationService {
    */
   async sendEmailNotification(notification, templateData) {
     try {
-      await emailService.sendEmail(notification.userEmail, notification.type, templateData);
+      await emailService.sendEmail(
+        notification.userEmail,
+        notification.type,
+        templateData,
+      );
       await notification.update({ emailSent: true, emailSentAt: new Date() });
-      logger.info('Email sent and notification record updated.', { id: notification.id });
-    } catch (error) {
-      logger.error('Email sending failed; notification saved but email not sent.', {
-        notificationId: notification.id,
-        error: error.message,
+      logger.info("Email sent and notification record updated.", {
+        id: notification.id,
       });
+    } catch (error) {
+      logger.error(
+        "Email sending failed; notification saved but email not sent.",
+        {
+          notificationId: notification.id,
+          error: error.message,
+        },
+      );
       // Don't re-throw — we still successfully stored the notification
     }
   }
@@ -55,7 +67,7 @@ class NotificationService {
     const offset = (page - 1) * limit;
     const { count, rows } = await Notification.findAndCountAll({
       where: { userId },
-      order: [['createdAt', 'DESC']],
+      order: [["createdAt", "DESC"]],
       limit: parseInt(limit, 10),
       offset,
     });
@@ -85,7 +97,7 @@ class NotificationService {
   async markAllAsRead(userId) {
     const [updatedCount] = await Notification.update(
       { isRead: true },
-      { where: { userId, isRead: false } }
+      { where: { userId, isRead: false } },
     );
     return updatedCount;
   }
