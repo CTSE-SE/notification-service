@@ -10,7 +10,7 @@ env:
   AWS_REGION: ap-southeast-1
   ECR_REPOSITORY: notification-service
   ECS_CLUSTER: shopapp-cluster
-  ECS_SERVICE: notification-service
+  ECS_SERVICE: notification-service-service-9gvw7yb1
   CONTAINER_NAME: notification-service
 
 jobs:
@@ -199,6 +199,24 @@ jobs:
           task-definition: task-definition.json
           container-name: ${{ env.CONTAINER_NAME }}
           image: ${{ needs.build-and-push.outputs.image }}
+          environment-variables: |
+            PORT=3001
+            NODE_ENV=production
+            DB_HOST=${{ secrets.DB_HOST }}
+            DB_PORT=5432
+            DB_NAME=${{ secrets.DB_NAME }}
+            DB_USER=${{ secrets.DB_USER }}
+            DB_PASSWORD=${{ secrets.DB_PASSWORD }}
+            DB_SSL=true
+            AWS_REGION=ap-southeast-1
+            SQS_QUEUE_URL=${{ secrets.SQS_QUEUE_URL }}
+            SQS_POLLING_INTERVAL_MS=5000
+            SQS_MAX_MESSAGES=10
+            SQS_WAIT_TIME_SECONDS=20
+            JWT_SECRET=${{ secrets.JWT_SECRET }}
+            INTERNAL_API_KEY=${{ secrets.INTERNAL_API_KEY }}
+            SES_FROM_EMAIL=${{ secrets.SES_FROM_EMAIL }}
+            SES_FROM_NAME=ShopApp Notifications
 
       - name: Deploy updated task definition to ECS
         uses: aws-actions/amazon-ecs-deploy-task-definition@v1
@@ -210,16 +228,13 @@ jobs:
 
       - name: Verify deployment health check
         run: |
-          echo "Waiting 15s for new task to start..."
-          sleep 15
-          ALB_DNS=${{ secrets.ALB_DNS }}
+          echo "Waiting 30s for new task to start..."
+          sleep 30
           RESPONSE=$(curl -s -o /dev/null -w "%{http_code}" \
-            https://${ALB_DNS}/api/notifications/health || \
-            curl -s -o /dev/null -w "%{http_code}" \
-            https://${ALB_DNS}/health)
+            http://${{ secrets.EC2_HOST }}:3001/health)
           echo "Health check response: $RESPONSE"
           if [ "$RESPONSE" != "200" ]; then
             echo "Health check failed with status $RESPONSE"
             exit 1
           fi
-          echo "Deployment successful and healthy!"
+          echo "Deployment successful!"
