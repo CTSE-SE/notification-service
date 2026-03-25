@@ -12,6 +12,7 @@ env:
   ECS_CLUSTER: shopapp-cluster
   ECS_SERVICE: notification-service-service-9gvw7yb1
   CONTAINER_NAME: notification-service
+  TASK_DEFINITION: notification-service
 
 jobs:
   # ─────────────────────────────────────────────────────────────────
@@ -188,7 +189,7 @@ jobs:
       - name: Download current ECS task definition
         run: |
           aws ecs describe-task-definition \
-            --task-definition ${{ env.ECS_SERVICE }} \
+            --task-definition ${{ env.TASK_DEFINITION }} \
             --query taskDefinition \
             > task-definition.json
 
