@@ -191,6 +191,11 @@ jobs:
           aws ecs describe-task-definition \
             --task-definition ${{ env.TASK_DEFINITION }} \
             --query taskDefinition \
+            > task-definition-raw.json
+
+          # Remove unsupported keys
+          cat task-definition-raw.json | \
+            jq 'del(.taskDefinitionArn, .requiresAttributes, .compatibilities, .revision, .status, .registeredAt, .registeredBy, .enableFaultInjection)' \
             > task-definition.json
 
       - name: Update task definition with new image
