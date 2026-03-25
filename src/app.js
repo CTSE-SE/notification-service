@@ -13,7 +13,18 @@ const logger = require('./utils/logger');
 const app = express();
 
 // ─── Security Headers ──────────────────────────────────────────────
-app.use(helmet());
+app.use(
+  helmet({
+    contentSecurityPolicy: {
+      directives: {
+        defaultSrc: ["'self'"],
+        scriptSrc: ["'self'", "'unsafe-inline'"],
+        styleSrc: ["'self'", "'unsafe-inline'"],
+        imgSrc: ["'self'", 'data:'],
+      },
+    },
+  })
+);
 
 // ─── CORS ──────────────────────────────────────────────────────────
 app.use(cors({
