@@ -239,7 +239,7 @@ jobs:
           echo "Waiting 30s for new task to start..."
           sleep 30
           RESPONSE=$(curl -s -o /dev/null -w "%{http_code}" \
-            http://${{ secrets.EC2_HOST }}:3001/health)
+            http://shopapp-alb-1013507396.ap-southeast-1.elb.amazonaws.com/health)
           echo "Health check response: $RESPONSE"
           if [ "$RESPONSE" != "200" ]; then
             echo "Health check failed with status $RESPONSE"
