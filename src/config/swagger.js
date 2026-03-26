@@ -10,8 +10,8 @@ const options = {
     },
     servers: [
       {
-        url: 'http://47.129.13.252:3001',
-        description: 'Production Server',
+        url: 'http://shopapp-alb-1013507396.ap-southeast-1.elb.amazonaws.com',
+        description: 'AWS Production',
       },
       {
         url: 'http://localhost:3001',
